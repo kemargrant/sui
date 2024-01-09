@@ -16,6 +16,7 @@ use sui_network::{
     api::{Validator, ValidatorServer},
     tonic,
 };
+use sui_types::effects::TransactionEvents;
 use sui_types::messages_consensus::ConsensusTransaction;
 use sui_types::messages_grpc::{
     HandleCertificateResponseV2, HandleTransactionResponse, ObjectInfoRequest, ObjectInfoResponse,
@@ -23,9 +24,9 @@ use sui_types::messages_grpc::{
 };
 use sui_types::multiaddr::Multiaddr;
 use sui_types::sui_system_state::SuiSystemState;
+use sui_types::traffic_control::ServiceResponse;
 use sui_types::traffic_control::{PolicyConfig, RemoteFirewallConfig};
 use sui_types::{effects::TransactionEffectsAPI, message_envelope::Message};
-use sui_types::{effects::TransactionEvents, traffic_control::ServiceResponse};
 use sui_types::{error::*, transaction::*};
 use sui_types::{
     fp_ensure,
@@ -259,7 +260,7 @@ impl ValidatorService {
         validator_metrics: Arc<ValidatorServiceMetrics>,
         traffic_controller_metrics: TrafficControllerMetrics,
         policy_config: Option<PolicyConfig>,
-        firewall_config: RemoteFirewallConfig,
+        firewall_config: Option<RemoteFirewallConfig>,
     ) -> Self {
         Self {
             state,
@@ -267,9 +268,9 @@ impl ValidatorService {
             metrics: validator_metrics,
             traffic_controller: policy_config.map(|policy| {
                 Arc::new(TrafficController::spawn(
-                    firewall_config,
                     policy,
                     traffic_controller_metrics,
+                    firewall_config,
                 ))
             }),
         }

@@ -178,7 +178,7 @@ pub struct NodeConfig {
     pub policy_config: Option<PolicyConfig>,
 
     #[serde(default)]
-    pub firewall_config: RemoteFirewallConfig,
+    pub firewall_config: Option<RemoteFirewallConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]

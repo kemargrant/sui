@@ -16,7 +16,6 @@ use url::Url;
 use sui_json_rpc::ServerType;
 use sui_json_rpc::{JsonRpcServerBuilder, ServerHandle};
 use sui_json_rpc_api::CLIENT_SDK_TYPE_HEADER;
-use sui_types::traffic_control::RemoteFirewallConfig;
 
 use crate::apis::{
     CoinReadApi, ExtendedApi, GovernanceReadApi, IndexerApi, MoveUtilsApi, ReadApi,
@@ -136,7 +135,7 @@ pub async fn build_json_rpc_server(
         env!("CARGO_PKG_VERSION"),
         prometheus_registry,
         None,
-        RemoteFirewallConfig::default(),
+        None, /* RemoteFirewallConfig */
     );
     let http_client = crate::get_http_client(config.rpc_client_url.as_str())?;
 

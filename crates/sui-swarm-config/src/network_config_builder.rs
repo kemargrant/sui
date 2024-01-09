@@ -64,7 +64,7 @@ pub struct ConfigBuilder<R = OsRng> {
     authority_overload_config: Option<AuthorityOverloadConfig>,
     data_ingestion_dir: Option<PathBuf>,
     policy_config: Option<PolicyConfig>,
-    firewall_config: RemoteFirewallConfig,
+    firewall_config: Option<RemoteFirewallConfig>,
 }
 
 impl ConfigBuilder {
@@ -82,7 +82,7 @@ impl ConfigBuilder {
             authority_overload_config: None,
             data_ingestion_dir: None,
             policy_config: None,
-            firewall_config: RemoteFirewallConfig::default(),
+            firewall_config: None,
         }
     }
 
@@ -210,7 +210,7 @@ impl<R> ConfigBuilder<R> {
         self
     }
 
-    pub fn with_firewall_config(mut self, config: RemoteFirewallConfig) -> Self {
+    pub fn with_firewall_config(mut self, config: Option<RemoteFirewallConfig>) -> Self {
         self.firewall_config = config;
         self
     }

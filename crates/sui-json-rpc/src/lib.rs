@@ -57,7 +57,7 @@ pub struct JsonRpcServerBuilder {
     rpc_doc: Project,
     registry: Registry,
     policy_config: Option<PolicyConfig>,
-    firewall_config: RemoteFirewallConfig,
+    firewall_config: Option<RemoteFirewallConfig>,
 }
 
 pub fn sui_rpc_doc(version: &str) -> Project {
@@ -83,7 +83,7 @@ impl JsonRpcServerBuilder {
         version: &str,
         prometheus_registry: &Registry,
         policy_config: Option<PolicyConfig>,
-        firewall_config: RemoteFirewallConfig,
+        firewall_config: Option<RemoteFirewallConfig>,
     ) -> Self {
         Self {
             module: RpcModule::new(()),

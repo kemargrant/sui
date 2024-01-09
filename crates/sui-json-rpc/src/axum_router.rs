@@ -48,7 +48,7 @@ impl<L> JsonRpcService<L> {
         methods: Methods,
         rpc_router: RpcRouter,
         logger: L,
-        remote_fw_config: RemoteFirewallConfig,
+        remote_fw_config: Option<RemoteFirewallConfig>,
         policy_config: Option<PolicyConfig>,
         traffic_controller_metrics: TrafficControllerMetrics,
     ) -> Self {
@@ -59,9 +59,9 @@ impl<L> JsonRpcService<L> {
             id_provider: Arc::new(RandomIntegerIdProvider),
             traffic_controller: policy_config.map(|policy| {
                 Arc::new(TrafficController::spawn(
-                    remote_fw_config,
                     policy,
                     traffic_controller_metrics,
+                    remote_fw_config,
                 ))
             }),
         }

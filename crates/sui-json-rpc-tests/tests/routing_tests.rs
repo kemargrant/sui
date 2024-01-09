@@ -21,12 +21,7 @@ use sui_types::traffic_control::RemoteFirewallConfig;
 
 #[tokio::test]
 async fn test_rpc_backward_compatibility() {
-    let mut builder = JsonRpcServerBuilder::new(
-        "1.5",
-        &Registry::new(),
-        None,
-        RemoteFirewallConfig::default(),
-    );
+    let mut builder = JsonRpcServerBuilder::new("1.5", &Registry::new(), None, None);
     builder.register_module(TestApiModule).unwrap();
 
     let address = local_ip_utils::new_local_tcp_socket_for_testing();
@@ -105,12 +100,7 @@ async fn test_rpc_backward_compatibility() {
 async fn test_disable_routing() {
     env::set_var("DISABLE_BACKWARD_COMPATIBILITY", "true");
 
-    let mut builder = JsonRpcServerBuilder::new(
-        "1.5",
-        &Registry::new(),
-        None,
-        RemoteFirewallConfig::default(),
-    );
+    let mut builder = JsonRpcServerBuilder::new("1.5", &Registry::new(), None, None);
     builder.register_module(TestApiModule).unwrap();
 
     let address = local_ip_utils::new_local_tcp_socket_for_testing();
@@ -146,7 +136,7 @@ async fn test_disable_routing() {
 // #[tokio::test]
 // async fn test_rpc_backward_compatibility_batched_request() {
 //     let mut builder = JsonRpcServerBuilder::new(
-//          "1.5", &Registry::new(), None, RemoteFirewallConfig::default()
+//          "1.5", &Registry::new(), None, None
 //     );
 //     builder.register_module(TestApiModule).unwrap();
 

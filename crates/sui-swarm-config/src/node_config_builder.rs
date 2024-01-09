@@ -37,7 +37,7 @@ pub struct ValidatorConfigBuilder {
     authority_overload_config: Option<AuthorityOverloadConfig>,
     data_ingestion_dir: Option<PathBuf>,
     policy_config: Option<PolicyConfig>,
-    firewall_config: RemoteFirewallConfig,
+    firewall_config: Option<RemoteFirewallConfig>,
 }
 
 impl ValidatorConfigBuilder {
@@ -85,7 +85,7 @@ impl ValidatorConfigBuilder {
         self
     }
 
-    pub fn with_firewall_config(mut self, config: RemoteFirewallConfig) -> Self {
+    pub fn with_firewall_config(mut self, config: Option<RemoteFirewallConfig>) -> Self {
         self.firewall_config = config;
         self
     }
@@ -477,7 +477,7 @@ impl FullnodeConfigBuilder {
             run_with_range: self.run_with_range,
             websocket_only: false,
             policy_config: self.policy_config,
-            firewall_config: self.fw_config.unwrap_or_default(),
+            firewall_config: self.fw_config,
         }
     }
 }
