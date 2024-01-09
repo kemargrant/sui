@@ -2,6 +2,9 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::net::SocketAddr;
+use std::time::Duration;
+
 use shared_crypto::intent::Intent;
 use shared_crypto::intent::IntentMessage;
 use std::net::SocketAddr;
