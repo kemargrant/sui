@@ -1,18 +1,23 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+pub mod nodefw_client;
+pub mod nodefw_test_server;
 
 use dashmap::DashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tracing::info;
+
+use crate::traffic_controller::nodefw_client::{BlockAddress, BlockAddresses, NodeFWClient};
 use mysten_metrics::spawn_monitored_task;
 use std::time::{Duration, SystemTime};
 use sui_types::traffic_control::{
-    Policy, PolicyConfig, PolicyResponse, TrafficControlPolicy, TrafficTally,
+    Policy, PolicyConfig, PolicyResponse, RemoteFirewallConfig, TrafficControlPolicy, TrafficTally,
 };
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tracing::{info, warn};
+use tracing::warn;
 
 type BlocklistT = Arc<DashMap<SocketAddr, SystemTime>>;
 
@@ -30,7 +35,7 @@ pub struct TrafficController {
 }
 
 impl TrafficController {
-    pub async fn spawn(policy_config: PolicyConfig) -> Self {
+    pub async fn spawn(fw_config: RemoteFirewallConfig, policy_config: PolicyConfig) -> Self {
         let (tx, rx) = mpsc::channel(policy_config.channel_capacity);
         let ret = Self {
             tally_channel: tx,
@@ -40,7 +45,7 @@ impl TrafficController {
             },
         };
         let blocklists = ret.blocklists.clone();
-        spawn_monitored_task!(run_tally_loop(rx, policy_config, blocklists));
+        spawn_monitored_task!(run_tally_loop(rx, policy_config, fw_config, blocklists));
         ret
     }
 
@@ -65,6 +70,7 @@ impl TrafficController {
         }
     }
 
+    /// Returns true if the connection is allowed, false if it is blocked
     pub async fn check(
         &self,
         connection_ip: Option<SocketAddr>,
@@ -102,18 +108,45 @@ impl TrafficController {
 async fn run_tally_loop(
     mut receiver: mpsc::Receiver<TrafficTally>,
     policy_config: PolicyConfig,
+    fw_config: RemoteFirewallConfig,
     blocklists: Blocklists,
 ) {
     let mut spam_policy = policy_config.clone().to_spam_policy();
     let mut error_policy = policy_config.clone().to_error_policy();
     let spam_blocklists = Arc::new(blocklists.clone());
     let error_blocklists = Arc::new(blocklists);
+    let node_fw_client = if !(fw_config.delegate_spam_blocking || fw_config.delegate_error_blocking)
+    {
+        None
+    } else {
+        Some(NodeFWClient::new(fw_config.remote_fw_url.clone()))
+    };
+
     loop {
         tokio::select! {
             received = receiver.recv() => match received {
                 Some(tally) => {
-                    handle_spam_tally(&mut spam_policy, &policy_config, tally.clone(), spam_blocklists.clone()).await;
-                    handle_error_tally(&mut error_policy, &policy_config, tally, error_blocklists.clone()).await;
+                    handle_spam_tally(
+                        &mut spam_policy,
+                        &policy_config,
+                        &node_fw_client,
+                        &fw_config,
+                        tally.clone(),
+                        spam_blocklists.clone(),
+                    )
+                    .await
+                    .expect("Error handling spam tally");
+
+                    handle_error_tally(
+                        &mut error_policy,
+                        &policy_config,
+                        &node_fw_client,
+                        &fw_config,
+                        tally,
+                        error_blocklists.clone(),
+                    )
+                    .await
+                    .expect("Error handling error tally");
                 }
                 None => {
                     info!("TrafficController tally channel closed by all senders");
@@ -126,49 +159,107 @@ async fn run_tally_loop(
 
 async fn handle_error_tally(
     policy: &mut TrafficControlPolicy,
-    config: &PolicyConfig,
+    policy_config: &PolicyConfig,
+    nodefw_client: &Option<NodeFWClient>,
+    fw_config: &RemoteFirewallConfig,
     tally: TrafficTally,
     blocklists: Arc<Blocklists>,
-) {
-    let err = if let Some(err) = tally.clone().result.err() {
-        err
+) -> Result<(), reqwest::Error> {
+    if tally.result.is_ok() {
+        return Ok(());
+    }
+    if let Err(err) = tally.clone().result {
+        if !policy_config.tallyable_error_codes.contains(&err) {
+            return Ok(());
+        }
+    }
+    let resp = policy.handle_tally(tally.clone());
+    if fw_config.delegate_error_blocking {
+        let client = nodefw_client
+            .as_ref()
+            .expect("Expected NodeFWClient for blocklist delegation");
+        delegate_policy_response(resp, policy_config, client, fw_config.destination_port).await
     } else {
-        return;
-    };
-    if config.tallyable_error_codes.contains(&err) {
-        handle_tally_impl(policy, config, tally, blocklists).await
+        handle_policy_response(resp, policy_config, blocklists).await;
+        Ok(())
     }
 }
 
 async fn handle_spam_tally(
     policy: &mut TrafficControlPolicy,
-    config: &PolicyConfig,
+    policy_config: &PolicyConfig,
+    nodefw_client: &Option<NodeFWClient>,
+    fw_config: &RemoteFirewallConfig,
     tally: TrafficTally,
     blocklists: Arc<Blocklists>,
-) {
-    handle_tally_impl(policy, config, tally, blocklists).await
+) -> Result<(), reqwest::Error> {
+    let resp = policy.handle_tally(tally.clone());
+    if fw_config.delegate_spam_blocking {
+        let client = nodefw_client
+            .as_ref()
+            .expect("Expected NodeFWClient for blocklist delegation");
+        delegate_policy_response(resp, policy_config, client, fw_config.destination_port).await
+    } else {
+        handle_policy_response(resp, policy_config, blocklists).await;
+        Ok(())
+    }
 }
 
-async fn handle_tally_impl(
-    policy: &mut TrafficControlPolicy,
-    config: &PolicyConfig,
-    tally: TrafficTally,
-    blocklists: Arc<Blocklists>,
-) {
-    let PolicyResponse {
+async fn handle_policy_response(
+    PolicyResponse {
         block_connection_ip,
         block_proxy_ip,
-    } = policy.handle_tally(tally.clone());
+    }: PolicyResponse,
+    PolicyConfig {
+        connection_blocklist_ttl_sec,
+        proxy_blocklist_ttl_sec,
+        ..
+    }: &PolicyConfig,
+    blocklists: Arc<Blocklists>,
+) {
     if let Some(ip) = block_connection_ip {
         blocklists.connection_ips.insert(
             ip,
-            SystemTime::now() + Duration::from_secs(config.connection_blocklist_ttl_sec),
+            SystemTime::now() + Duration::from_secs(*connection_blocklist_ttl_sec),
         );
     }
     if let Some(ip) = block_proxy_ip {
         blocklists.proxy_ips.insert(
             ip,
-            SystemTime::now() + Duration::from_secs(config.proxy_blocklist_ttl_sec),
+            SystemTime::now() + Duration::from_secs(*proxy_blocklist_ttl_sec),
         );
     }
+}
+
+async fn delegate_policy_response(
+    PolicyResponse {
+        block_connection_ip,
+        block_proxy_ip,
+    }: PolicyResponse,
+    PolicyConfig {
+        connection_blocklist_ttl_sec,
+        proxy_blocklist_ttl_sec,
+        ..
+    }: &PolicyConfig,
+    node_fw_client: &NodeFWClient,
+    destination_port: u16,
+) -> Result<(), reqwest::Error> {
+    let mut addresses = vec![];
+    if let Some(ip) = block_connection_ip {
+        addresses.push(BlockAddress {
+            source_address: ip.to_string(),
+            destination_port,
+            ttl: *connection_blocklist_ttl_sec,
+        });
+    }
+    if let Some(ip) = block_proxy_ip {
+        addresses.push(BlockAddress {
+            source_address: ip.to_string(),
+            destination_port,
+            ttl: *proxy_blocklist_ttl_sec,
+        });
+    }
+    node_fw_client
+        .block_addresses(BlockAddresses { addresses })
+        .await
 }

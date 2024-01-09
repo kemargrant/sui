@@ -38,7 +38,7 @@ use sui_types::crypto::{get_key_pair, AccountKeyPair};
 use sui_types::effects::{TransactionEffects, TransactionEffectsAPI};
 use sui_types::error::SuiResult;
 use sui_types::object::{Object, Owner};
-use sui_types::traffic_control::PolicyConfig;
+use sui_types::traffic_control::{PolicyConfig, RemoteFirewallConfig};
 use sui_types::transaction::CertifiedTransaction;
 use sui_types::transaction::{
     Transaction, VerifiedCertificate, TEST_ONLY_GAS_UNIT_FOR_HEAVY_COMPUTATION_STORAGE,
@@ -762,6 +762,7 @@ async fn test_authority_txn_signing_pushback() {
             consensus_adapter,
             Arc::new(ValidatorServiceMetrics::new_for_tests()),
             PolicyConfig::default(),
+            RemoteFirewallConfig::default(),
         )
         .await,
     );
@@ -895,6 +896,7 @@ async fn test_authority_txn_execution_pushback() {
             consensus_adapter,
             Arc::new(ValidatorServiceMetrics::new_for_tests()),
             PolicyConfig::default(),
+            RemoteFirewallConfig::default(),
         )
         .await,
     );
