@@ -405,6 +405,10 @@ struct FeatureFlags {
     // Set the upper bound allowed for max_epoch in zklogin signature.
     #[serde(skip_serializing_if = "Option::is_none")]
     zklogin_max_epoch_upper_bound_delta: Option<u64>,
+
+    // Enable VDF
+    #[serde(skip_serializing_if = "is_false")]
+    enable_vdf: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -955,6 +959,10 @@ pub struct ProtocolConfig {
     // zklogin::check_zklogin_issuer
     check_zklogin_issuer_cost_base: Option<u64>,
 
+    // VDF related functions
+    vdf_verify_vdf_cost: Option<u64>,
+    vdf_hash_to_input_cost: Option<u64>,
+
     // Const params for consensus scoring decision
     // The scaling factor property for the MED outlier detection
     scoring_decision_mad_divisor: Option<f64>,
@@ -1226,6 +1234,10 @@ impl ProtocolConfig {
 
     pub fn per_object_congestion_control_mode(&self) -> PerObjectCongestionControlMode {
         self.feature_flags.per_object_congestion_control_mode
+    }
+
+    pub fn enable_vdf(&self) -> bool {
+        self.feature_flags.enable_vdf
     }
 }
 
@@ -1631,6 +1643,9 @@ impl ProtocolConfig {
             check_zklogin_id_cost_base: None,
             // zklogin::check_zklogin_issuer
             check_zklogin_issuer_cost_base: None,
+
+            vdf_verify_vdf_cost: None,
+            vdf_hash_to_input_cost: None,
 
             max_size_written_objects: None,
             max_size_written_objects_system_tx: None,
@@ -2065,6 +2080,13 @@ impl ProtocolConfig {
                 43 => {
                     cfg.feature_flags.zklogin_max_epoch_upper_bound_delta = Some(30);
                     cfg.max_meter_ticks_per_package = Some(16_000_000);
+
+                    if chain != Chain::Mainnet && chain != Chain::Testnet {
+                        // enable vdf in devnet
+                        cfg.feature_flags.enable_vdf = true;
+                        cfg.vdf_verify_vdf_cost = Some(2000);
+                        cfg.vdf_hash_to_input_cost = Some(1000);
+                    }
                 }
                 // Use this template when making changes:
                 //
