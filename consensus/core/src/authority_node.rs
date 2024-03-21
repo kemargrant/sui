@@ -326,6 +326,10 @@ mod tests {
         async fn get_missing_blocks(&self) -> Result<BTreeSet<BlockRef>, CoreError> {
             unimplemented!()
         }
+
+        async fn get_highest_accepted_rounds(&self) -> Result<Vec<Round>, CoreError> {
+            unimplemented!()
+        }
     }
 
     #[derive(Default)]
@@ -357,6 +361,7 @@ mod tests {
             &self,
             _peer: AuthorityIndex,
             _block_refs: Vec<BlockRef>,
+            _highest_accepted_rounds: Vec<Round>,
             _timeout: Duration,
         ) -> ConsensusResult<Vec<Bytes>> {
             unimplemented!("Unimplemented")
