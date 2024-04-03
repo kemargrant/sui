@@ -6,16 +6,15 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::commit::CommitAPI;
-use crate::error::{ConsensusError, ConsensusResult};
-use crate::CommitConsumer;
 use crate::{
     block::{timestamp_utc_ms, BlockAPI, VerifiedBlock},
-    commit::{load_committed_subdag_from_store, CommitIndex, CommittedSubDag},
+    commit::{load_committed_subdag_from_store, CommitAPI, CommitIndex, CommittedSubDag},
     context::Context,
     dag_state::DagState,
+    error::{ConsensusError, ConsensusResult},
     linearizer::Linearizer,
     storage::Store,
+    CommitConsumer,
 };
 
 /// Role of CommitObserver
@@ -175,7 +174,7 @@ mod tests {
         commit::DEFAULT_WAVE_LENGTH,
         context::Context,
         dag_state::DagState,
-        leader_schedule::LeaderSchedule,
+        leader_schedule::{LeaderSchedule, LeaderSwapTable},
         storage::mem_store::MemStore,
         test_dag::{build_dag, get_all_leader_blocks},
     };
@@ -190,7 +189,7 @@ mod tests {
             context.clone(),
             mem_store.clone(),
         )));
-        let leader_schedule = LeaderSchedule::new(context.clone());
+        let leader_schedule = LeaderSchedule::new(context.clone(), LeaderSwapTable::default());
         let last_processed_commit_round = 0;
         let last_processed_commit_index = 0;
         let (sender, mut receiver) = unbounded_channel();
@@ -280,7 +279,7 @@ mod tests {
             context.clone(),
             mem_store.clone(),
         )));
-        let leader_schedule = LeaderSchedule::new(context.clone());
+        let leader_schedule = LeaderSchedule::new(context.clone(), LeaderSwapTable::default());
         let last_processed_commit_round = 0;
         let last_processed_commit_index = 0;
         let (sender, mut receiver) = unbounded_channel();
@@ -417,7 +416,7 @@ mod tests {
             context.clone(),
             mem_store.clone(),
         )));
-        let leader_schedule = LeaderSchedule::new(context.clone());
+        let leader_schedule = LeaderSchedule::new(context.clone(), LeaderSwapTable::default());
         let last_processed_commit_round = 0;
         let last_processed_commit_index = 0;
         let (sender, mut receiver) = unbounded_channel();
