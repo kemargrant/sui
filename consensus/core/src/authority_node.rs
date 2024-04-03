@@ -19,6 +19,7 @@ use crate::{
     core::{Core, CoreSignals},
     core_thread::{ChannelCoreThreadDispatcher, CoreThreadHandle},
     dag_state::DagState,
+    leader_schedule::{LeaderSchedule, LeaderSwapTable},
     leader_timeout::{LeaderTimeoutTask, LeaderTimeoutTaskHandle},
     metrics::initialise_metrics,
     network::{anemo_network::AnemoManager, tonic_network::TonicManager, NetworkManager},
@@ -189,8 +190,14 @@ where
         let commit_observer =
             CommitObserver::new(context.clone(), commit_consumer, dag_state.clone(), store);
 
+        let leader_schedule = Arc::new(LeaderSchedule::new(
+            context.clone(),
+            LeaderSwapTable::default(),
+        ));
+
         let core = Core::new(
             context.clone(),
+            leader_schedule,
             tx_consumer,
             block_manager,
             commit_observer,
