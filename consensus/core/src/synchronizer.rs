@@ -439,10 +439,10 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         let at = serialized_blocks
             .iter()
             .position(|b| b.is_empty())
-            .unwrap_or(serialized_blocks.len().saturating_sub(1));
+            .unwrap_or(serialized_blocks.len());
         let (serialized_blocks, mut ancestor_serialized_blocks) = serialized_blocks.split_at(at);
 
-        // remove the separator from the `ancestor_serialized_blocks` if not empty
+        // remove the separator (empty bytes element) from the `ancestor_serialized_blocks` if not empty
         if !ancestor_serialized_blocks.is_empty() {
             ancestor_serialized_blocks = &ancestor_serialized_blocks[1..];
         }
