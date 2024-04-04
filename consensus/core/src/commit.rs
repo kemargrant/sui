@@ -435,6 +435,16 @@ impl Display for LeaderStatus {
     }
 }
 
+/// Per-commit properties that can be derived and do not need to be part of the Commit struct.
+/// Only the latest version is needed for CommitInfo, but more versions are stored for
+/// debugging and potential recovery.
+// TODO: version this struct.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct CommitInfo {
+    pub(crate) last_committed_rounds: Vec<Round>,
+    pub(crate) reputation_scores: Vec<u64>,
+}
+
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CommitRange(Range<CommitIndex>);
 

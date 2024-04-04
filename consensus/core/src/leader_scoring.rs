@@ -21,7 +21,6 @@ use crate::{
     CommittedSubDag, Round,
 };
 
-#[allow(unused)]
 pub(crate) struct ReputationScoreCalculator<'a> {
     // The range of commits that these scores were calculated from.
     pub commit_range: CommitRange,
@@ -43,7 +42,6 @@ pub(crate) struct ReputationScoreCalculator<'a> {
     committer: &'a UniversalCommitter,
 }
 
-#[allow(unused)]
 impl<'a> ReputationScoreCalculator<'a> {
     pub(crate) fn new(
         context: Arc<Context>,
@@ -122,7 +120,6 @@ pub(crate) struct ReputationScores {
     pub commit_range: CommitRange,
 }
 
-#[allow(unused)]
 impl ReputationScores {
     pub(crate) fn new(commit_range: CommitRange, scores_per_authority: Vec<u64>) -> Self {
         Self {
