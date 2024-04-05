@@ -210,6 +210,7 @@ where
             context.clone(),
             core_dispatcher.clone(),
             block_verifier.clone(),
+            dag_state.clone(),
         );
 
         let network_service = Arc::new(AuthorityService::new(
@@ -426,6 +427,7 @@ mod tests {
             context.clone(),
             core_dispatcher.clone(),
             block_verifier.clone(),
+            dag_state.clone(),
         );
         let authority_service = Arc::new(AuthorityService::new(
             context.clone(),

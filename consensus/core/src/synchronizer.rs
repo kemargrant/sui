@@ -5,7 +5,7 @@ use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use mysten_metrics::{monitored_future, monitored_scope};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 #[cfg(not(test))]
 use rand::{prelude::SliceRandom, rngs::ThreadRng};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -22,6 +22,7 @@ use crate::block::{BlockRef, SignedBlock, VerifiedBlock};
 use crate::block_verifier::BlockVerifier;
 use crate::context::Context;
 use crate::core_thread::CoreThreadDispatcher;
+use crate::dag_state::DagState;
 use crate::error::{ConsensusError, ConsensusResult};
 use crate::network::NetworkClient;
 use crate::{BlockAPI, Round};
@@ -211,6 +212,7 @@ pub(crate) struct Synchronizer<C: NetworkClient, V: BlockVerifier, D: CoreThread
     commands_receiver: Receiver<Command>,
     fetch_block_senders: BTreeMap<AuthorityIndex, Sender<BlocksGuard>>,
     core_dispatcher: Arc<D>,
+    dag_state: Arc<RwLock<DagState>>,
     fetch_blocks_scheduler_task: JoinSet<()>,
     network_client: Arc<C>,
     block_verifier: Arc<V>,
@@ -224,6 +226,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         context: Arc<Context>,
         core_dispatcher: Arc<D>,
         block_verifier: Arc<V>,
+        dag_state: Arc<RwLock<DagState>>,
     ) -> Arc<SynchronizerHandle> {
         let (commands_sender, commands_receiver) = channel(1_000);
         let inflight_blocks_map = InflightBlocksMap::new();
@@ -242,6 +245,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
                 block_verifier.clone(),
                 context.clone(),
                 core_dispatcher.clone(),
+                dag_state.clone(),
                 receiver,
                 commands_sender.clone(),
             ));
@@ -262,6 +266,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
                 block_verifier,
                 inflight_blocks_map,
                 commands_sender: commands_sender_clone,
+                dag_state,
             };
             s.run().await;
         });
@@ -361,6 +366,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         block_verifier: Arc<V>,
         context: Arc<Context>,
         core_dispatcher: Arc<D>,
+        dag_state: Arc<RwLock<DagState>>,
         mut receiver: Receiver<BlocksGuard>,
         commands_sender: Sender<Command>,
     ) {
@@ -373,13 +379,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
                 Some(blocks_guard) = receiver.recv(), if requests.len() < FETCH_BLOCKS_CONCURRENCY => {
 
                     // get the highest accepted rounds
-                    let highest_rounds = match core_dispatcher.get_highest_accepted_rounds().await {
-                        Ok(rounds) => rounds,
-                        Err(err) => {
-                            debug!("Core is shutting down, synchronizer is shutting down: {err:?}");
-                            return;
-                        }
-                    };
+                    let highest_rounds = Self::get_highest_accepted_rounds(dag_state.clone(), context.clone());
 
                     requests.push(Self::fetch_blocks_request(network_client.clone(), peer_index, blocks_guard, highest_rounds, FETCH_REQUEST_TIMEOUT, 1))
                 },
@@ -506,6 +506,21 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         Ok(())
     }
 
+    fn get_highest_accepted_rounds(
+        dag_state: Arc<RwLock<DagState>>,
+        context: Arc<Context>,
+    ) -> Vec<Round> {
+        let blocks = dag_state
+            .read()
+            .get_last_cached_block_per_authority(Round::MAX);
+        assert_eq!(blocks.len(), context.committee.size());
+
+        blocks
+            .into_iter()
+            .map(|block| block.round())
+            .collect::<Vec<_>>()
+    }
+
     fn verify_blocks(
         serialized_blocks: Vec<Bytes>,
         valid_block_refs: BTreeSet<BlockRef>,
@@ -611,6 +626,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         let core_dispatcher = self.core_dispatcher.clone();
         let blocks_to_fetch = self.inflight_blocks_map.clone();
         let commands_sender = self.commands_sender.clone();
+        let dag_state = self.dag_state.clone();
 
         self.fetch_blocks_scheduler_task
             .spawn(monitored_future!(async move {
@@ -619,7 +635,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
                 let total_requested = missing_blocks.len();
 
                 // Fetch blocks from peers
-                let results = Self::fetch_blocks_from_authorities(context.clone(), blocks_to_fetch.clone(), network_client, missing_blocks, core_dispatcher.clone()).await;
+                let results = Self::fetch_blocks_from_authorities(context.clone(), blocks_to_fetch.clone(), network_client, missing_blocks, core_dispatcher.clone(), dag_state).await;
                 if results.is_empty() {
                     warn!("No results returned while requesting missing blocks");
                     return;
@@ -650,7 +666,8 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         inflight_blocks: Arc<InflightBlocksMap>,
         network_client: Arc<C>,
         missing_blocks: BTreeSet<BlockRef>,
-        core_dispatcher: Arc<D>,
+        _core_dispatcher: Arc<D>,
+        dag_state: Arc<RwLock<DagState>>,
     ) -> Vec<(BlocksGuard, Vec<Bytes>, AuthorityIndex)> {
         const MAX_PEERS: usize = 3;
         const MAX_TOTAL_BLOCKS_TO_FETCH: usize = MAX_PEERS * MAX_FETCH_BLOCKS_PER_REQUEST;
@@ -679,14 +696,7 @@ impl<C: NetworkClient, V: BlockVerifier, D: CoreThreadDispatcher> Synchronizer<C
         let mut peers = peers.into_iter();
         let mut request_futures = FuturesUnordered::new();
 
-        // get the highest accepted rounds
-        let highest_rounds = match core_dispatcher.get_highest_accepted_rounds().await {
-            Ok(rounds) => rounds,
-            Err(err) => {
-                debug!("Core is shutting down, synchronizer is shutting down: {err:?}");
-                return vec![];
-            }
-        };
+        let highest_rounds = Self::get_highest_accepted_rounds(dag_state, context);
 
         // Send the initial requests
         for blocks in missing_blocks.chunks(MAX_FETCH_BLOCKS_PER_REQUEST) {
@@ -761,14 +771,17 @@ mod tests {
     use crate::block_verifier::NoopBlockVerifier;
     use crate::context::Context;
     use crate::core_thread::{CoreError, CoreThreadDispatcher};
+    use crate::dag_state::DagState;
     use crate::error::{ConsensusError, ConsensusResult};
     use crate::network::{BlockStream, NetworkClient};
+    use crate::storage::mem_store::MemStore;
     use crate::synchronizer::{
         InflightBlocksMap, Synchronizer, FETCH_BLOCKS_CONCURRENCY, FETCH_REQUEST_TIMEOUT,
     };
     use async_trait::async_trait;
     use bytes::Bytes;
     use consensus_config::AuthorityIndex;
+    use parking_lot::RwLock;
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
     use std::time::Duration;
@@ -993,12 +1006,15 @@ mod tests {
         let block_verifier = Arc::new(NoopBlockVerifier {});
         let core_dispatcher = Arc::new(MockCoreThreadDispatcher::default());
         let network_client = Arc::new(MockNetworkClient::default());
+        let store = Arc::new(MemStore::new());
+        let dag_state = Arc::new(RwLock::new(DagState::new(context.clone(), store)));
 
         let handle = Synchronizer::start(
             network_client.clone(),
             context,
             core_dispatcher.clone(),
             block_verifier,
+            dag_state,
         );
 
         // Create some test blocks
@@ -1035,12 +1051,15 @@ mod tests {
         let block_verifier = Arc::new(NoopBlockVerifier {});
         let core_dispatcher = Arc::new(MockCoreThreadDispatcher::default());
         let network_client = Arc::new(MockNetworkClient::default());
+        let store = Arc::new(MemStore::new());
+        let dag_state = Arc::new(RwLock::new(DagState::new(context.clone(), store)));
 
         let handle = Synchronizer::start(
             network_client.clone(),
             context,
             core_dispatcher.clone(),
             block_verifier,
+            dag_state,
         );
 
         // Create some test blocks
@@ -1088,6 +1107,8 @@ mod tests {
         let block_verifier = Arc::new(NoopBlockVerifier {});
         let core_dispatcher = Arc::new(MockCoreThreadDispatcher::default());
         let network_client = Arc::new(MockNetworkClient::default());
+        let store = Arc::new(MemStore::new());
+        let dag_state = Arc::new(RwLock::new(DagState::new(context.clone(), store)));
 
         // Create some test blocks
         let expected_blocks = (0..10)
@@ -1127,6 +1148,7 @@ mod tests {
             context,
             core_dispatcher.clone(),
             block_verifier,
+            dag_state,
         );
 
         sleep(2 * FETCH_REQUEST_TIMEOUT).await;
