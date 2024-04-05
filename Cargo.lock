@@ -4358,7 +4358,7 @@ dependencies = [
 [[package]]
 name = "fastcrypto"
 version = "0.1.7"
-source = "git+https://github.com/MystenLabs/fastcrypto?rev=7b224e374cb73cb78104948939f8fa2be980eaac#7b224e374cb73cb78104948939f8fa2be980eaac"
+source = "git+https://github.com/MystenLabs/fastcrypto?rev=d7a33a9f79271bfc19fc4c8816ea5467e4205e17#d7a33a9f79271bfc19fc4c8816ea5467e4205e17"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4413,7 +4413,7 @@ dependencies = [
 [[package]]
 name = "fastcrypto-derive"
 version = "0.1.3"
-source = "git+https://github.com/MystenLabs/fastcrypto?rev=7b224e374cb73cb78104948939f8fa2be980eaac#7b224e374cb73cb78104948939f8fa2be980eaac"
+source = "git+https://github.com/MystenLabs/fastcrypto?rev=d7a33a9f79271bfc19fc4c8816ea5467e4205e17#d7a33a9f79271bfc19fc4c8816ea5467e4205e17"
 dependencies = [
  "quote 1.0.35",
  "syn 1.0.107",
@@ -4422,7 +4422,7 @@ dependencies = [
 [[package]]
 name = "fastcrypto-tbls"
 version = "0.1.0"
-source = "git+https://github.com/MystenLabs/fastcrypto?rev=7b224e374cb73cb78104948939f8fa2be980eaac#7b224e374cb73cb78104948939f8fa2be980eaac"
+source = "git+https://github.com/MystenLabs/fastcrypto?rev=d7a33a9f79271bfc19fc4c8816ea5467e4205e17#d7a33a9f79271bfc19fc4c8816ea5467e4205e17"
 dependencies = [
  "bcs",
  "digest 0.10.7",
@@ -4440,7 +4440,7 @@ dependencies = [
 [[package]]
 name = "fastcrypto-zkp"
 version = "0.1.2"
-source = "git+https://github.com/MystenLabs/fastcrypto?rev=7b224e374cb73cb78104948939f8fa2be980eaac#7b224e374cb73cb78104948939f8fa2be980eaac"
+source = "git+https://github.com/MystenLabs/fastcrypto?rev=d7a33a9f79271bfc19fc4c8816ea5467e4205e17#d7a33a9f79271bfc19fc4c8816ea5467e4205e17"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -4795,9 +4795,9 @@ checksum = "efd193069b0ddadc69c46389b740bbccdd97203899b48d09c5f7969591d6bae2"
 
 [[package]]
 name = "futures-timer"
-version = "3.0.3"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
+checksum = "e64b03909df88034c26dc1547e8970b91f98bdb65165d6a4e9110d94263dbb2c"
 dependencies = [
  "gloo-timers",
  "send_wrapper 0.4.0",
@@ -6563,9 +6563,19 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-borrow-graph",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-vm-config",
  "petgraph 0.5.1",
+]
+
+[[package]]
+name = "move-bytecode-verifier-meter"
+version = "0.1.0"
+dependencies = [
+ "move-binary-format",
+ "move-core-types",
+ "move-vm-config",
 ]
 
 [[package]]
@@ -6575,6 +6585,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-borrow-graph",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-vm-config",
  "petgraph 0.5.1",
@@ -6587,6 +6598,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-borrow-graph",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-vm-config",
  "petgraph 0.5.1",
@@ -6599,6 +6611,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-borrow-graph",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-vm-config",
  "petgraph 0.5.1",
@@ -11595,9 +11608,11 @@ dependencies = [
  "json_to_table",
  "miette",
  "move-binary-format",
+ "move-bytecode-verifier-meter",
  "move-command-line-common",
  "move-core-types",
  "move-package",
+ "move-vm-config",
  "move-vm-profiler",
  "msim",
  "num-bigint 0.4.4",
@@ -11656,6 +11671,7 @@ dependencies = [
  "move-binary-format",
  "move-bytecode-utils",
  "move-bytecode-verifier",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-package",
  "move-vm-config",
@@ -11689,6 +11705,7 @@ dependencies = [
  "leb128",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v0",
  "move-core-types",
  "move-package",
@@ -11716,6 +11733,7 @@ dependencies = [
  "leb128",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v1",
  "move-core-types",
  "move-package",
@@ -11742,6 +11760,7 @@ dependencies = [
  "leb128",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v2",
  "move-core-types",
  "move-package",
@@ -12322,6 +12341,7 @@ dependencies = [
  "cargo_metadata 0.15.4",
  "move-binary-format",
  "move-bytecode-verifier",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v0",
  "move-bytecode-verifier-v1",
  "move-bytecode-verifier-v2",
@@ -12438,6 +12458,7 @@ name = "sui-framework-tests"
 version = "0.1.0"
 dependencies = [
  "move-bytecode-verifier",
+ "move-bytecode-verifier-meter",
  "move-cli",
  "move-package",
  "move-unit-test",
@@ -13204,6 +13225,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "insta",
+ "move-vm-config",
  "schemars",
  "serde",
  "serde_with",
@@ -14002,6 +14024,7 @@ dependencies = [
  "move-binary-format",
  "move-bytecode-utils",
  "move-bytecode-verifier",
+ "move-bytecode-verifier-meter",
  "move-core-types",
  "move-vm-config",
  "sui-protocol-config",
@@ -14023,6 +14046,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v0",
  "move-core-types",
  "move-vm-config",
@@ -14037,6 +14061,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v1",
  "move-core-types",
  "move-vm-config",
@@ -14050,6 +14075,7 @@ dependencies = [
  "move-abstract-stack",
  "move-binary-format",
  "move-bytecode-utils",
+ "move-bytecode-verifier-meter",
  "move-bytecode-verifier-v2",
  "move-core-types",
  "move-vm-config",
@@ -14658,9 +14684,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.37.0"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1adbebffeca75fcfd058afa480fb6c0b81e165a0323f9c9d39c9697e37c46787"
+checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931"
 dependencies = [
  "backtrace",
  "bytes",

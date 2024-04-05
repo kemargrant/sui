@@ -261,6 +261,25 @@ async fn test_create_authenticator_state_object() {
     }
 }
 
+use test_strategy::proptest;
+use test_strategy::Arbitrary;
+
+#[derive(Arbitrary, Debug)]
+struct TestInputStruct {
+    // the epoch that last till 10000 years assuming epoch duration is ~24 hours.
+    #[strategy(0..3650000u64)]
+    max_epoch: u64,
+    jwt_rand_bytes: [u8; 16],
+    salt_bytes: [u8; 16],
+    seed_ephemeral_kp: [u8; 32],
+    sub: [u8; 32],
+}
+
+#[sim_test]
+#[proptest(async = "tokio")]
+async fn test_end_to_end_test_issuer(test_input: TestInputStruct) {
+    println!("test");
+}
 // This test is intended to look for forks caused by conflicting / repeated JWK votes from
 // validators.
 #[cfg(msim)]
