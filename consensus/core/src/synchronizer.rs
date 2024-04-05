@@ -827,10 +827,6 @@ mod tests {
             lock.clear();
             Ok(result)
         }
-
-        async fn get_highest_accepted_rounds(&self) -> Result<Vec<Round>, CoreError> {
-            Ok(vec![])
-        }
     }
 
     type FetchRequestKey = (Vec<BlockRef>, AuthorityIndex);

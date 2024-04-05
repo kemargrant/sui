@@ -327,10 +327,6 @@ mod tests {
         async fn get_missing_blocks(&self) -> Result<BTreeSet<BlockRef>, CoreError> {
             unimplemented!()
         }
-
-        async fn get_highest_accepted_rounds(&self) -> Result<Vec<Round>, CoreError> {
-            unimplemented!()
-        }
     }
 
     #[derive(Default)]
