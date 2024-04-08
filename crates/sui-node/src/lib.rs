@@ -140,8 +140,11 @@ pub struct ValidatorComponents {
     validator_server_handle: JoinHandle<Result<()>>,
     validator_overload_monitor_handle: Option<JoinHandle<()>>,
     consensus_manager: ConsensusManager,
+    inactive_consensus_manager: Option<ConsensusManager>,
     consensus_epoch_data_remover: EpochDataRemover,
+    inactive_consensus_epoch_data_remover: Option<EpochDataRemover>,
     consensus_adapter: Arc<ConsensusAdapter>,
+    inactive_consensus_adapter: Option<Arc<ConsensusAdapter>>,
     // dropping this will eventually stop checkpoint tasks. The receiver side of this channel
     // is copied into each checkpoint service task, and they are listening to any change to this
     // channel. When the sender is dropped, a change is triggered and those tasks will exit.
@@ -1095,11 +1098,10 @@ impl SuiNode {
                     "narwhal" => ConsensusProtocol::Narwhal,
                     "mysticeti" => ConsensusProtocol::Mysticeti,
                     "swap_each_epoch" => {
-                        if epoch_store.epoch() % 2 == 0 {
-                            ConsensusProtocol::Narwhal
-                        } else {
-                            ConsensusProtocol::Mysticeti
-                        }
+                        // Default to narwhal and swappingon each epoch happens
+                        // during reconfig in start_epoch_specific_validator_components
+
+                        ConsensusProtocol::Narwhal
                     }
                     _ => {
                         let consensus = consensus_config.protocol.clone();
@@ -1113,7 +1115,12 @@ impl SuiNode {
         }
 
         // TODO (mysticeti): Move protocol choice to a protocol config flag.
-        let (consensus_adapter, consensus_manager) = match consensus_config.protocol {
+        let (
+            mut consensus_adapter,
+            mut consensus_manager,
+            mut inactive_consensus_adapter,
+            mut inactive_consensus_manager,
+        ) = match consensus_config.protocol {
             ConsensusProtocol::Narwhal => {
                 let consensus_adapter = Arc::new(Self::construct_consensus_adapter(
                     &committee,
@@ -1128,7 +1135,7 @@ impl SuiNode {
                 ));
                 let consensus_manager =
                     ConsensusManager::new_narwhal(&config, consensus_config, registry_service);
-                (consensus_adapter, consensus_manager)
+                (consensus_adapter, consensus_manager, None, None)
             }
             ConsensusProtocol::Mysticeti => {
                 let client = Arc::new(LazyMysticetiClient::new());
@@ -1148,7 +1155,58 @@ impl SuiNode {
                     registry_service,
                     client,
                 );
-                (consensus_adapter, consensus_manager)
+                (consensus_adapter, consensus_manager, None, None)
+            }
+            ConsensusProtocol::SwapEachEpoch => {
+                let narwhal_consensus_adapter = Arc::new(Self::construct_consensus_adapter(
+                    &committee,
+                    consensus_config,
+                    state.name,
+                    connection_monitor_status.clone(),
+                    &registry_service.default_registry(),
+                    epoch_store.protocol_config().clone(),
+                    Arc::new(LazyNarwhalClient::new(
+                        consensus_config.address().to_owned(),
+                    )),
+                ));
+                let narwhal_consensus_manager =
+                    ConsensusManager::new_narwhal(&config, consensus_config, registry_service);
+
+                let client = Arc::new(LazyMysticetiClient::new());
+
+                let mysticeti_consensus_adapter = Arc::new(Self::construct_consensus_adapter(
+                    &committee,
+                    consensus_config,
+                    state.name,
+                    connection_monitor_status.clone(),
+                    &registry_service.default_registry(),
+                    epoch_store.protocol_config().clone(),
+                    client.clone(),
+                ));
+                let mysticeti_consensus_manager = ConsensusManager::new_mysticeti(
+                    &config,
+                    consensus_config,
+                    registry_service,
+                    client,
+                );
+
+                if epoch_store.epoch() % 2 == 0 {
+                    // narwhal is active consensus
+                    (
+                        narwhal_consensus_adapter,
+                        narwhal_consensus_manager,
+                        Some(mysticeti_consensus_adapter),
+                        Some(mysticeti_consensus_manager),
+                    )
+                } else {
+                    // mysticeti is active consensus
+                    (
+                        mysticeti_consensus_adapter,
+                        mysticeti_consensus_manager,
+                        Some(narwhal_consensus_adapter),
+                        Some(narwhal_consensus_manager),
+                    )
+                }
             }
         };
 
@@ -1157,6 +1215,16 @@ impl SuiNode {
 
         // This only gets started up once, not on every epoch. (Make call to remove every epoch.)
         consensus_epoch_data_remover.run().await;
+
+        let inactive_consensus_epoch_data_remover =
+            if let Some(ref icm) = inactive_consensus_manager {
+                let mut inactive_conseneus_epoch_data_remover =
+                    EpochDataRemover::new(icm.get_storage_base_path());
+                inactive_conseneus_epoch_data_remover.run().await;
+                Some(inactive_conseneus_epoch_data_remover)
+            } else {
+                None
+            };
 
         let checkpoint_metrics = CheckpointMetrics::new(&registry_service.default_registry());
         let sui_tx_validator_metrics =
@@ -1191,19 +1259,23 @@ impl SuiNode {
         Self::start_epoch_specific_validator_components(
             &config,
             state.clone(),
-            consensus_adapter,
+            &mut consensus_adapter,
+            &mut inactive_consensus_adapter,
             checkpoint_store,
             epoch_store,
             state_sync_handle,
             randomness_handle,
-            consensus_manager,
-            consensus_epoch_data_remover,
+            &mut consensus_manager,
+            &mut inactive_consensus_manager,
+            &mut consensus_epoch_data_remover,
+            &mut inactive_consensus_epoch_data_remover,
             accumulator,
             validator_server_handle,
             validator_overload_monitor_handle,
             checkpoint_metrics,
             sui_node_metrics,
             sui_tx_validator_metrics,
+            false,
         )
         .await
     }
@@ -1211,23 +1283,52 @@ impl SuiNode {
     async fn start_epoch_specific_validator_components(
         config: &NodeConfig,
         state: Arc<AuthorityState>,
-        consensus_adapter: Arc<ConsensusAdapter>,
+        active_consensus_adapter: &mut Arc<ConsensusAdapter>,
+        inactive_consensus_adapter: &mut Option<Arc<ConsensusAdapter>>,
         checkpoint_store: Arc<CheckpointStore>,
         epoch_store: Arc<AuthorityPerEpochStore>,
         state_sync_handle: state_sync::Handle,
         randomness_handle: randomness::Handle,
-        consensus_manager: ConsensusManager,
-        consensus_epoch_data_remover: EpochDataRemover,
+        active_consensus_manager: &mut ConsensusManager,
+        inactive_consensus_manager: &mut Option<ConsensusManager>,
+        active_consensus_epoch_data_remover: &mut EpochDataRemover,
+        inactive_consensus_epoch_data_remover: &mut Option<EpochDataRemover>,
         accumulator: Arc<StateAccumulator>,
         validator_server_handle: JoinHandle<Result<()>>,
         validator_overload_monitor_handle: Option<JoinHandle<()>>,
         checkpoint_metrics: Arc<CheckpointMetrics>,
         sui_node_metrics: Arc<SuiNodeMetrics>,
         sui_tx_validator_metrics: Arc<SuiTxValidatorMetrics>,
+        is_reconfig: bool,
     ) -> Result<ValidatorComponents> {
+        if is_reconfig {
+            // if this is happening during reconfig we should check to see if
+            // swapping consensus is required.
+            // swap the inactive_consensus_adapter with consensus_adapter
+            // and inactive_consensus_manager with consensus_manager
+
+            if let Some(inactive_adapter) = inactive_consensus_adapter.take() {
+                // Swap the adapters
+                std::mem::swap(active_consensus_adapter, &mut inactive_adapter);
+                *inactive_consensus_adapter = Some(inactive_adapter);
+            }
+
+            if let Some(inactive_manager) = inactive_consensus_manager.take() {
+                // Swap the managers
+                std::mem::swap(active_consensus_manager, &mut inactive_manager);
+                *inactive_consensus_manager = Some(inactive_manager);
+            }
+
+            if let Some(inactive_remover) = inactive_consensus_epoch_data_remover.take() {
+                // Swap the removers
+                std::mem::swap(active_consensus_epoch_data_remover, &mut inactive_remover);
+                *inactive_consensus_epoch_data_remover = Some(inactive_remover);
+            }
+        }
+
         let (checkpoint_service, checkpoint_service_exit) = Self::start_checkpoint_service(
             config,
-            consensus_adapter.clone(),
+            active_consensus_adapter.clone(),
             checkpoint_store,
             epoch_store.clone(),
             state.clone(),
@@ -1241,12 +1342,12 @@ impl SuiNode {
         // will read the values to make decisions about which validator submits a transaction to consensus
         let low_scoring_authorities = Arc::new(ArcSwap::new(Arc::new(HashMap::new())));
 
-        consensus_adapter.swap_low_scoring_authorities(low_scoring_authorities.clone());
+        active_consensus_adapter.swap_low_scoring_authorities(low_scoring_authorities.clone());
 
         if epoch_store.randomness_state_enabled() {
             let randomness_manager = RandomnessManager::try_new(
                 Arc::downgrade(&epoch_store),
-                consensus_adapter.clone(),
+                active_consensus_adapter.clone(),
                 randomness_handle,
                 config.protocol_key_pair(),
             )
@@ -1269,7 +1370,7 @@ impl SuiNode {
             ThroughputProfileRanges::from_chain(epoch_store.get_chain_identifier()),
         ));
 
-        consensus_adapter.swap_throughput_profiler(throughput_profiler);
+        active_consensus_adapter.swap_throughput_profiler(throughput_profiler);
 
         let consensus_handler_initializer = ConsensusHandlerInitializer::new(
             state.clone(),
@@ -1279,7 +1380,7 @@ impl SuiNode {
             throughput_calculator,
         );
 
-        consensus_manager
+        active_consensus_manager
             .start(
                 config,
                 epoch_store.clone(),
@@ -1299,16 +1400,19 @@ impl SuiNode {
                 sui_node_metrics,
                 state.name,
                 epoch_store.clone(),
-                consensus_adapter.clone(),
+                active_consensus_adapter.clone(),
             );
         }
 
         Ok(ValidatorComponents {
             validator_server_handle,
             validator_overload_monitor_handle,
-            consensus_manager,
-            consensus_epoch_data_remover,
-            consensus_adapter,
+            consensus_manager: active_consensus_manager,
+            consensus_epoch_data_remover: active_consensus_epoch_data_remover,
+            consensus_adapter: active_consensus_adapter,
+            inactive_consensus_adapter,
+            inactive_consensus_manager,
+            inactive_consensus_epoch_data_remover,
             checkpoint_service_exit,
             checkpoint_metrics,
             sui_tx_validator_metrics,
@@ -1589,9 +1693,12 @@ impl SuiNode {
             let new_validator_components = if let Some(ValidatorComponents {
                 validator_server_handle,
                 validator_overload_monitor_handle,
-                consensus_manager,
-                consensus_epoch_data_remover,
-                consensus_adapter,
+                mut consensus_manager,
+                mut consensus_epoch_data_remover,
+                mut consensus_adapter,
+                mut inactive_consensus_manager,
+                mut inactive_consensus_epoch_data_remover,
+                mut inactive_consensus_adapter,
                 checkpoint_service_exit,
                 checkpoint_metrics,
                 sui_tx_validator_metrics,
@@ -1623,19 +1730,23 @@ impl SuiNode {
                         Self::start_epoch_specific_validator_components(
                             &self.config,
                             self.state.clone(),
-                            consensus_adapter,
+                            &mut consensus_adapter,
+                            &mut inactive_consensus_adapter,
                             self.checkpoint_store.clone(),
                             new_epoch_store.clone(),
                             self.state_sync_handle.clone(),
                             self.randomness_handle.clone(),
-                            consensus_manager,
-                            consensus_epoch_data_remover,
+                            &mut consensus_manager,
+                            &mut inactive_consensus_manager,
+                            &mut consensus_epoch_data_remover,
+                            &mut inactive_consensus_epoch_data_remover,
                             self.accumulator.clone(),
                             validator_server_handle,
                             validator_overload_monitor_handle,
                             checkpoint_metrics,
                             self.metrics.clone(),
                             sui_tx_validator_metrics,
+                            true,
                         )
                         .await?,
                     )

@@ -347,6 +347,8 @@ pub enum ConsensusProtocol {
     Narwhal,
     #[serde(rename = "mysticeti")]
     Mysticeti,
+    #[serde(rename = "swap_each_epoch")]
+    SwapEachEpoch,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
