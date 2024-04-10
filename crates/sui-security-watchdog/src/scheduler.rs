@@ -14,9 +14,11 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
-use tokio_cron_scheduler::{Job, JobScheduler};
+use std::time::Duration;
+use tokio::time;
 use tracing::{error, info};
-use uuid::Uuid;
+
+const MIST_PER_SUI: i128 = 1_000_000_000;
 
 // MonitoringEntry is an enum that represents the types of monitoring entries that can be scheduled.
 #[derive(Serialize, Deserialize)]
@@ -32,7 +34,7 @@ enum MonitoringEntry {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MetricPublishingEntry {
     name: String,
-    cron_schedule: String,
+    period: Duration,
     sql_query: String,
     metric_name: String,
     timed_upper_limits: BTreeMap<DateTime<Utc>, f64>,
@@ -45,12 +47,11 @@ pub struct MetricPublishingEntry {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WalletMonitoringEntry {
     name: String,
-    cron_schedule: String,
+    period: Duration,
     sql_query: String,
 }
 
 pub struct SchedulerService {
-    scheduler: JobScheduler,
     query_runner: Arc<dyn QueryRunner>,
     metrics: Arc<WatchdogMetrics>,
     entries: Vec<MonitoringEntry>,
@@ -60,15 +61,7 @@ pub struct SchedulerService {
 
 impl SchedulerService {
     pub async fn new(config: &SecurityWatchdogConfig, registry: &Registry) -> anyhow::Result<Self> {
-        let mut scheduler = JobScheduler::new().await?;
-        scheduler.shutdown_on_ctrl_c();
-        scheduler.set_shutdown_handler(Box::new(|| {
-            Box::pin(async move {
-                info!("Scheduler shut down complete");
-            })
-        }));
         Ok(Self {
-            scheduler,
             query_runner: Arc::new(SnowflakeQueryRunner::from_config(config)?),
             metrics: Arc::new(WatchdogMetrics::new(registry)),
             entries: Self::from_config(config)?,
@@ -83,7 +76,6 @@ impl SchedulerService {
                 MonitoringEntry::MetricPublishingEntry(entry) => {
                     Self::schedule_metric_publish_job(
                         entry.clone(),
-                        self.scheduler.clone(),
                         self.query_runner.clone(),
                         self.metrics.clone(),
                     )
@@ -92,7 +84,6 @@ impl SchedulerService {
                 MonitoringEntry::WalletMonitoringEntry(entry) => {
                     self.schedule_wallet_monitoring_job(
                         entry.clone(),
-                        self.scheduler.clone(),
                         self.query_runner.clone(),
                         self.pd_wallet_monitoring_service_id.clone(),
                         self.metrics.clone(),
@@ -102,11 +93,6 @@ impl SchedulerService {
                 }
             }
         }
-        Ok(())
-    }
-
-    pub async fn start(&self) -> anyhow::Result<()> {
-        self.scheduler.start().await?;
         Ok(())
     }
 
@@ -121,26 +107,25 @@ impl SchedulerService {
     async fn schedule_wallet_monitoring_job(
         &self,
         entry: WalletMonitoringEntry,
-        scheduler: JobScheduler,
         query_runner: Arc<dyn QueryRunner>,
         pd_service_id: String,
         metrics: Arc<WatchdogMetrics>,
         pagerduty: Pagerduty,
-    ) -> anyhow::Result<Uuid> {
+    ) -> anyhow::Result<()> {
         let name = entry.name.clone();
-        let cron_schedule = entry.cron_schedule.clone();
+        let mut interval = time::interval(entry.period);
 
-        let job = Job::new_async(cron_schedule.as_str(), move |_uuid, _lock| {
-            let entry = entry.clone();
-            let query_runner = query_runner.clone();
-            let pd_service_id = pd_service_id.to_string();
-            let pd = pagerduty.clone();
-            let metrics = metrics.clone();
-            Box::pin(async move {
+        tokio::spawn(async move {
+            loop {
+                interval.tick().await;
                 info!("Running wallet monitoring job: {}", entry.name);
-                if let Err(err) =
-                    Self::run_wallet_monitoring_job(&pd, &pd_service_id, &query_runner, &entry)
-                        .await
+                if let Err(err) = Self::run_wallet_monitoring_job(
+                    &pagerduty,
+                    &pd_service_id,
+                    &query_runner,
+                    &entry,
+                )
+                .await
                 {
                     error!("Failed to run wallet monitoring job with err: {}", err);
                     metrics
@@ -149,11 +134,10 @@ impl SchedulerService {
                         .iter()
                         .for_each(|metric| metric.inc());
                 }
-            })
-        })?;
-        let job_id = scheduler.add(job).await?;
+            }
+        });
         info!("Scheduled job: {}", name);
-        Ok(job_id)
+        Ok(())
     }
 
     async fn run_wallet_monitoring_job(
@@ -171,12 +155,12 @@ impl SchedulerService {
                 .downcast_ref::<String>()
                 .ok_or(anyhow!("Failed to downcast wallet_id"))?
                 .clone();
-            let current_balance = Self::extract_u64(
+            let current_balance = Self::extract_i128(
                 row.get("CURRENT_BALANCE")
                     .ok_or_else(|| anyhow!("Missing current_balance"))?,
             )
             .ok_or(anyhow!("Failed to downcast current_balance"))?;
-            let lower_bound = Self::extract_u64(
+            let lower_bound = Self::extract_i128(
                 row.get("LOWER_BOUND")
                     .ok_or_else(|| anyhow!("Missing lower_bound"))?,
             )
@@ -196,8 +180,8 @@ impl SchedulerService {
     async fn create_wallet_monitoring_incident(
         pagerduty: &Pagerduty,
         wallet_id: &str,
-        current_balance: u64,
-        lower_bound: u64,
+        current_balance: i128,
+        lower_bound: i128,
         service_id: &str,
     ) -> anyhow::Result<()> {
         let service = Service {
@@ -206,8 +190,9 @@ impl SchedulerService {
         };
         let incident_body = Body {
             details: format!(
-                "Current balance: {}, Lower bound: {}",
-                current_balance, lower_bound
+                "Current balance: {} SUI, Lower bound: {} SUI",
+                current_balance / MIST_PER_SUI,
+                lower_bound / MIST_PER_SUI
             ),
             ..Default::default()
         };
@@ -227,17 +212,15 @@ impl SchedulerService {
 
     async fn schedule_metric_publish_job(
         entry: MetricPublishingEntry,
-        scheduler: JobScheduler,
         query_runner: Arc<dyn QueryRunner>,
         metrics: Arc<WatchdogMetrics>,
-    ) -> anyhow::Result<Uuid> {
+    ) -> anyhow::Result<()> {
         let name = entry.name.clone();
-        let cron_schedule = entry.cron_schedule.clone();
-        let job = Job::new_async(cron_schedule.as_str(), move |_uuid, _lock| {
-            let entry = entry.clone();
-            let query_runner = query_runner.clone();
-            let metrics = metrics.clone();
-            Box::pin(async move {
+        let mut interval = time::interval(entry.period);
+
+        tokio::spawn(async move {
+            loop {
+                interval.tick().await;
                 info!("Running metric publish job: {}", &entry.name);
                 if let Err(err) =
                     Self::run_metric_publish_job(&query_runner, &metrics, &entry).await
@@ -249,11 +232,10 @@ impl SchedulerService {
                         .iter()
                         .for_each(|metric| metric.inc());
                 }
-            })
-        })?;
-        let job_id = scheduler.add(job).await?;
+            }
+        });
         info!("Scheduled job: {}", name);
-        Ok(job_id)
+        Ok(())
     }
 
     async fn run_metric_publish_job(
@@ -288,23 +270,23 @@ impl SchedulerService {
         limits.range(..Utc::now()).next_back().map(|(_, val)| *val)
     }
 
-    fn extract_u64(value: &Box<dyn Any + Send>) -> Option<u64> {
-        if let Some(value) = value.downcast_ref::<u64>() {
+    fn extract_i128(value: &Box<dyn Any + Send>) -> Option<i128> {
+        if let Some(value) = value.downcast_ref::<i128>() {
             Some(*value)
         } else if let Some(value) = value.downcast_ref::<u32>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else if let Some(value) = value.downcast_ref::<u16>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else if let Some(value) = value.downcast_ref::<u8>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else if let Some(value) = value.downcast_ref::<i64>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else if let Some(value) = value.downcast_ref::<i32>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else if let Some(value) = value.downcast_ref::<i16>() {
-            Some(*value as u64)
+            Some(*value as i128)
         } else {
-            value.downcast_ref::<i8>().map(|value| *value as u64)
+            value.downcast_ref::<i8>().map(|value| *value as i128)
         }
     }
 }
