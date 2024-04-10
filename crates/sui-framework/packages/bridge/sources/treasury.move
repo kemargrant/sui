@@ -14,7 +14,6 @@ module bridge::treasury {
     use sui::event::emit;
     use sui::hex;
     use sui::math;
-    use sui::object;
     use sui::object_bag::{Self, ObjectBag};
     use sui::package;
     use sui::package::UpgradeCap;
