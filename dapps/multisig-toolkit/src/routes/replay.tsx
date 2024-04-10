@@ -26,6 +26,7 @@ export function Replay() {
 	const [network, setNetwork] = useState('');
 
 	const [tab, setTab] = useState('overview');
+	const transactionDigest = data?.effects.effectsVersion?.transactionDigest;
 
 	useEffect(() => {
 		if (hash) {
@@ -85,10 +86,7 @@ export function Replay() {
 		>
 			<div className="mb-6">
 				<h1 className="text-lg font-bold">Transaction Replay</h1>
-				<ReplayLink
-					digest={data?.effects.transactionDigest}
-					text={data?.effects.transactionDigest!}
-				/>
+				<ReplayLink digest={transactionDigest} text={transactionDigest!} />
 			</div>
 
 			<Tabs.Root value={tab} onValueChange={setTab} className="w-full">

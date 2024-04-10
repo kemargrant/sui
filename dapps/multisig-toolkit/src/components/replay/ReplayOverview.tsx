@@ -3,7 +3,11 @@
 
 import { PreviewCard } from '../preview-effects/PreviewCard';
 import { onChainAmountToFloat } from '../preview-effects/utils';
-import { type Effects, type ReplayGasStatus, type ReplayInput } from './replay-types';
+import {
+	type Effects,
+	type ReplayGasStatus,
+	type ReplayInput,
+} from './replay-types';
 import { ReplayInputArgument } from './ReplayInputArgument';
 
 export function ReplayOverview({
@@ -15,13 +19,25 @@ export function ReplayOverview({
 	gasStatus: ReplayGasStatus;
 	inputs: ReplayInput[];
 }) {
+	let gasUsed = effects.effectsVersion?.gasUsed;
+	let status: any;
+
+	// let status = effects.effectsVersion.status;
+	// let success: any;
+	// if (status && 'status' in status) {
+	// 	success = status.status && status.status === 'success';
+	// }
+	// if (status && 'success' in status) {
+	// 	success = true;
+	// }
+
 	const totalGasCost = () => {
 		return (
 			onChainAmountToFloat(
 				(
-					BigInt(effects.gasUsed.computationCost) +
-					BigInt(effects.gasUsed.storageCost) -
-					BigInt(effects.gasUsed.storageRebate)
+					BigInt(gasUsed?.computationCost || '0') +
+					BigInt(gasUsed?.storageCost || '0') -
+					BigInt(gasUsed?.storageRebate || '0')
 				).toString(),
 				9,
 			)?.toString() || '-'
@@ -32,23 +48,20 @@ export function ReplayOverview({
 		<div>
 			<div>
 				<div className="px-2 py-2 m-1">
-					<p>
-						Execution Status:{' '}
-						{effects.status.status === 'success' ? '.𖥔 ݁ ˖Success ݁ ˖ 𖥔' : 'Failure ❗'}
-					</p>
-					<p> Executed Epoch: {effects.executedEpoch}</p>
+					<p>Execution Status: { status ? '.𖥔 ݁ ˖Success ݁ ˖ 𖥔' : 'Failure ❗'}</p>
+					<p> Executed Epoch: {effects.effectsVersion?.executedEpoch || -1}</p>
 				</div>
 
 				<PreviewCard.Root className="m-2">
 					<PreviewCard.Header> Gas Cost </PreviewCard.Header>
 					<PreviewCard.Body>
 						<p>Total Gas Cost: {totalGasCost()} SUI</p>
-						<p>Computation Cost: {onChainAmountToFloat(effects.gasUsed.computationCost, 9)} SUI</p>
-						<p>Storage Cost: {onChainAmountToFloat(effects.gasUsed.storageCost, 9)} SUI</p>
-						<p>Storage Rebate: {onChainAmountToFloat(effects.gasUsed.storageRebate, 9)} SUI</p>
+						<p>Computation Cost: {onChainAmountToFloat(gasUsed?.computationCost, 9)} SUI</p>
+						<p>Storage Cost: {onChainAmountToFloat(gasUsed?.storageCost, 9)} SUI</p>
+						<p>Storage Rebate: {onChainAmountToFloat(gasUsed?.storageRebate, 9)} SUI</p>
 						<p>
-							Non-refundable Storage Fee:{' '}
-							{onChainAmountToFloat(effects.gasUsed.nonRefundableStorageFee, 9)} SUI
+							Non-refundable Storage Fee: {onChainAmountToFloat(gasUsed?.nonRefundableStorageFee, 9)}{' '}
+							SUI
 						</p>
 					</PreviewCard.Body>
 				</PreviewCard.Root>
